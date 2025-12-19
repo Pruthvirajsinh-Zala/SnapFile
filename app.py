@@ -1,27 +1,42 @@
 import streamlit as st
 import requests
 import qrcode
+import zipfile
 from io import BytesIO
 
 # --- App Configuration ---
 st.set_page_config(page_title="SnapFile", page_icon="📂")
 st.title("📂 SnapFile")
-st.markdown("Upload a file to generate a **one-time** download link.")
+st.markdown("Upload files to generate a download link. **Multiple files** will be zipped automatically. Link valid for **60 minutes**.")
 
 # --- File Uploader ---
-uploaded_file = st.file_uploader("Choose a file", help="Max size 200MB")
 
-if uploaded_file is not None:
+uploaded_files = st.file_uploader("Choose files", accept_multiple_files=True, help="Select multiple files to share as a ZIP folder. Max size 200MB.")
+
+if uploaded_files:
     if st.button("Generate QR Code"):
         
-        with st.spinner("Uploading to server..."):
+        with st.spinner("Compressing & Uploading..."):
             try:
-                # --- 1. Upload to tmpfiles.org ---
+                # --- 1. Processing (Zip if needed) ---
+                if len(uploaded_files) > 1:
+                    # Create ZIP in memory
+                    buffer = BytesIO()
+                    with zipfile.ZipFile(buffer, "w") as z:
+                        for file in uploaded_files:
+                            z.writestr(file.name, file.getvalue())
+                    buffer.seek(0)
+                    file_to_upload = ("archive.zip", buffer.getvalue())
+                else:
+                    # Single file
+                    file_to_upload = (uploaded_files[0].name, uploaded_files[0].getvalue())
+
+                # --- 2. Upload to tmpfiles.org ---
                 # tmpfiles.org is more reliable for Streamlit Cloud than file.io
                 url = "https://tmpfiles.org/api/v1/upload"
                 
                 # Prepare file
-                files = {"file": (uploaded_file.name, uploaded_file.getvalue())}
+                files = {"file": file_to_upload}
                 
                 # Send POST request
                 response = requests.post(url, files=files)
