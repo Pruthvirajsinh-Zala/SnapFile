@@ -4,70 +4,77 @@ import qrcode
 from io import BytesIO
 
 # --- App Configuration ---
-st.set_page_config(page_title="Quick Share", page_icon="📂")
-st.title("📂 Secure File Share")
-st.markdown("Upload a file to generate a **one-time** download link valid for **12 hours**.")
+st.set_page_config(page_title="SnapFile", page_icon="📂")
+st.title("📂 SnapFile")
+st.markdown("Upload a file to generate a **one-time** download link.")
 
 # --- File Uploader ---
-uploaded_file = st.file_uploader("Choose a file", help="Max size depends on Streamlit config (usually 200MB)")
+uploaded_file = st.file_uploader("Choose a file", help="Max size 200MB")
 
 if uploaded_file is not None:
-    # Button to confirm upload
     if st.button("Generate QR Code"):
         
-        with st.spinner("Uploading to file.io..."):
+        with st.spinner("Uploading to server..."):
             try:
-                # --- 1. Upload to file.io ---
-                # file.io API url
-                url = "https://file.io"
+                # --- 1. Upload to tmpfiles.org ---
+                # tmpfiles.org is more reliable for Streamlit Cloud than file.io
+                url = "https://tmpfiles.org/api/v1/upload"
                 
-                # Payload: 'expires' sets the retention time (e.g., 12h, 1d, 1w)
-                # 'autoDelete' is True by default on file.io (delete after 1 download)
-                payload = {"expires": "12h"} 
-                
-                # Prepare file for upload
+                # Prepare file
                 files = {"file": (uploaded_file.name, uploaded_file.getvalue())}
                 
                 # Send POST request
-                response = requests.post(url, data=payload, files=files)
-                response.raise_for_status() # Raise error if upload failed
+                response = requests.post(url, files=files)
                 
-                # Extract link from JSON response
-                result = response.json()
-                if result.get("success"):
-                    download_link = result["link"]
+                # Check for HTTP errors (like 404 or 500)
+                if response.status_code != 200:
+                    st.error(f"Upload failed: Server returned status code {response.status_code}")
+                    st.code(response.text) # Show the raw error message
+                    st.stop()
+
+                # --- 2. Extract Link ---
+                try:
+                    result = response.json()
+                except ValueError:
+                    st.error("Server returned a non-JSON response (likely an IP block or downtime).")
+                    st.text(f"Raw response: {response.text}")
+                    st.stop()
+
+                if result.get("status") == "success":
+                    # tmpfiles returns a 'view' link. We need a direct 'download' link.
+                    # Convert: https://tmpfiles.org/123/file.txt -> https://tmpfiles.org/dl/123/file.txt
+                    raw_link = result["data"]["url"]
+                    download_link = raw_link.replace("tmpfiles.org/", "tmpfiles.org/dl/")
                     
-                    # --- 2. Generate QR Code ---
+                    # --- 3. Generate QR Code ---
                     qr = qrcode.QRCode(version=1, box_size=10, border=5)
                     qr.add_data(download_link)
                     qr.make(fit=True)
                     img = qr.make_image(fill_color="black", back_color="white")
                     
-                    # Convert QR image to bytes for Streamlit
+                    # Convert QR to bytes
                     buf = BytesIO()
                     img.save(buf)
                     byte_im = buf.getvalue()
                     
-                    # --- 3. Display Results ---
+                    # --- 4. Display Results ---
                     st.success("File uploaded successfully!")
                     
-                    # Layout: QR code on left, details on right
                     col1, col2 = st.columns([1, 2])
-                    
                     with col1:
                         st.image(byte_im, caption="Scan to Download", width=200)
-                        
                     with col2:
                         st.subheader("Download Link")
                         st.code(download_link, language="text")
-                        st.info("⚠️ This file will be deleted immediately after the first download or in 12 hours.")
+                        st.info("⚠️ This file is temporary and will be deleted after 60 minutes.")
                         
                 else:
-                    st.error("File.io reported an error.")
+                    st.error("Upload provider reported an error.")
+                    st.json(result) # Show the error details
                     
             except Exception as e:
-                st.error(f"An error occurred: {e}")
+                st.error(f"An unexpected error occurred: {e}")
 
 # --- Footer ---
 st.markdown("---")
-st.caption("Powered by Streamlit & File.io")
+st.caption("Powered by Streamlit & tmpfiles.org")
