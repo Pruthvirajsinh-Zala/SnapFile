@@ -7,10 +7,10 @@ from io import BytesIO
 # --- App Configuration ---
 st.set_page_config(page_title="SnapFile", page_icon="📂")
 st.title("📂 SnapFile")
-st.markdown("Upload files to generate a download link. **Multiple files** will be zipped automatically. Link valid for **14 days**.")
+st.markdown("Upload files to generate a download link. **Multiple files** will be zipped automatically. **Unlimited size**.")
 
 # --- File Uploader ---
-uploaded_files = st.file_uploader("Choose files", accept_multiple_files=True, help="Select multiple files to share as a ZIP folder. Max size 10 GB.")
+uploaded_files = st.file_uploader("Choose files", accept_multiple_files=True, help="Select multiple files to share as a ZIP folder. Max size Unlimited.")
 
 if uploaded_files:
     if st.button("Generate QR Code"):
@@ -32,48 +32,58 @@ if uploaded_files:
                     filename = uploaded_files[0].name
                     file_data = uploaded_files[0].getvalue()
 
-                # --- 2. Upload to transfer.sh ---
-                # transfer.sh uses PUT requests: PUT https://transfer.sh/filename
-                url = f"https://transfer.sh/{filename}"
+                # --- 2. Upload to gofile.io ---
+                # Step A: Get the best server
+                server_response = requests.get("https://api.gofile.io/getServer")
+                server_response.raise_for_status()
+                server_data = server_response.json()
                 
-                # Send PUT request with file data
-                response = requests.put(url, data=file_data)
-                
-                # Check for HTTP errors
-                if response.status_code != 200:
-                    st.error(f"Upload failed: Server returned status code {response.status_code}")
-                    st.code(response.text)
+                if server_data.get("status") != "ok":
+                    st.error("Failed to get upload server from Gofile.io")
                     st.stop()
-
-                # --- 3. Extract Link ---
-                # transfer.sh returns the download link directly in the response body text
-                download_link = response.text.strip()
+                    
+                server = server_data["data"]["server"]
                 
-                # --- 4. Generate QR Code ---
-                qr = qrcode.QRCode(version=1, box_size=10, border=5)
-                qr.add_data(download_link)
-                qr.make(fit=True)
-                img = qr.make_image(fill_color="black", back_color="white")
+                # Step B: Upload file
+                upload_url = f"https://{server}.gofile.io/uploadFile"
+                files = {"file": (filename, file_data)}
                 
-                # Convert QR to bytes
-                buf = BytesIO()
-                img.save(buf)
-                byte_im = buf.getvalue()
+                response = requests.post(upload_url, files=files)
+                response.raise_for_status()
                 
-                # --- 5. Display Results ---
-                st.success("File uploaded successfully!")
+                result = response.json()
                 
-                col1, col2 = st.columns([1, 2])
-                with col1:
-                    st.image(byte_im, caption="Scan to Download", width=200)
-                with col2:
-                    st.subheader("Download Link")
-                    st.code(download_link, language="text")
-                    st.info("⚠️ This file is valid for **14 days**.")
+                if result.get("status") == "ok":
+                    download_link = result["data"]["downloadPage"]
+                    
+                    # --- 3. Generate QR Code ---
+                    qr = qrcode.QRCode(version=1, box_size=10, border=5)
+                    qr.add_data(download_link)
+                    qr.make(fit=True)
+                    img = qr.make_image(fill_color="black", back_color="white")
+                    
+                    # Convert QR to bytes
+                    buf = BytesIO()
+                    img.save(buf)
+                    byte_im = buf.getvalue()
+                    
+                    # --- 4. Display Results ---
+                    st.success("File uploaded successfully!")
+                    
+                    col1, col2 = st.columns([1, 2])
+                    with col1:
+                        st.image(byte_im, caption="Scan to Download", width=200)
+                    with col2:
+                        st.subheader("Download Link")
+                        st.code(download_link, language="text")
+                        st.info("⚠️ Files are deleted if inactive (no downloads) for a period of time (usually 10+ days).")
+                        
+                else:
+                    st.error("Upload failed: " + str(result))
                     
             except Exception as e:
                 st.error(f"An unexpected error occurred: {e}")
 
 # --- Footer ---
 st.markdown("---")
-st.caption("Powered by Streamlit & transfer.sh")
+st.caption("Powered by Streamlit & Gofile.io")
