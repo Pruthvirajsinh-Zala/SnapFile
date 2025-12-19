@@ -7,10 +7,10 @@ from io import BytesIO
 # --- App Configuration ---
 st.set_page_config(page_title="SnapFile", page_icon="📂")
 st.title("📂 SnapFile")
-st.markdown("Upload files to generate a download link. **Multiple files** will be zipped automatically. **Unlimited size**.")
+st.markdown("Upload files to generate a download link. **Multiple files** will be zipped automatically. Link valid for **60 minutes**.")
 
 # --- File Uploader ---
-uploaded_files = st.file_uploader("Choose files", accept_multiple_files=True, help="Select multiple files to share as a ZIP folder. Max size Unlimited.")
+uploaded_files = st.file_uploader("Choose files", accept_multiple_files=True, help="Select multiple files to share as a ZIP folder. Max size 100 MB.")
 
 if uploaded_files:
     if st.button("Generate QR Code"):
@@ -25,36 +25,25 @@ if uploaded_files:
                         for file in uploaded_files:
                             z.writestr(file.name, file.getvalue())
                     buffer.seek(0)
-                    filename = "archive.zip"
-                    file_data = buffer.getvalue()
+                    file_to_upload = ("archive.zip", buffer.getvalue())
                 else:
                     # Single file
-                    filename = uploaded_files[0].name
-                    file_data = uploaded_files[0].getvalue()
+                    file_to_upload = (uploaded_files[0].name, uploaded_files[0].getvalue())
 
-                # --- 2. Upload to gofile.io ---
-                # Step A: Get the best server
-                server_response = requests.get("https://api.gofile.io/getServer")
-                server_response.raise_for_status()
-                server_data = server_response.json()
+                # --- 2. Upload to tmpfiles.org ---
+                url = "https://tmpfiles.org/api/v1/upload"
+                files = {"file": file_to_upload}
                 
-                if server_data.get("status") != "ok":
-                    st.error("Failed to get upload server from Gofile.io")
-                    st.stop()
-                    
-                server = server_data["data"]["server"]
-                
-                # Step B: Upload file
-                upload_url = f"https://{server}.gofile.io/uploadFile"
-                files = {"file": (filename, file_data)}
-                
-                response = requests.post(upload_url, files=files)
+                # Send POST request
+                response = requests.post(url, files=files)
                 response.raise_for_status()
                 
                 result = response.json()
                 
-                if result.get("status") == "ok":
-                    download_link = result["data"]["downloadPage"]
+                if result.get("status") == "success":
+                    raw_link = result["data"]["url"]
+                    # Transform to direct download link: tmpfiles.org/ -> tmpfiles.org/dl/
+                    download_link = raw_link.replace("tmpfiles.org/", "tmpfiles.org/dl/")
                     
                     # --- 3. Generate QR Code ---
                     qr = qrcode.QRCode(version=1, box_size=10, border=5)
@@ -76,7 +65,7 @@ if uploaded_files:
                     with col2:
                         st.subheader("Download Link")
                         st.code(download_link, language="text")
-                        st.info("⚠️ Files are deleted if inactive (no downloads) for a period of time (usually 10+ days).")
+                        st.info("⚠️ This file is temporary and will be deleted after 60 minutes.")
                         
                 else:
                     st.error("Upload failed: " + str(result))
@@ -86,4 +75,4 @@ if uploaded_files:
 
 # --- Footer ---
 st.markdown("---")
-st.caption("Powered by Streamlit & Gofile.io")
+st.caption("Powered by Streamlit & tmpfiles.org")
